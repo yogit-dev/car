@@ -111,3 +111,24 @@ Single front-on camera depth is estimated, so foot/knee motion toward the camera
 - **Auto-pilot** — lane keeping + cruise control. Tap the big **Auto-pilot** button on the Player phone (or the button / `P` on the game screen). It has no speed limit: it accelerates as fast as the car can go (about 160 km/h) and only brakes when a bend ahead needs it. **Brake** (foot or `↓`) or tap the button again to take over. While it is on the scene gets a blue tint. Code: `Autopilot.js` (tests: `autopilot.test.mjs`).
 - **One-hand driving** — show only one hand (held out as if gripping the wheel) and the steering follows it: move it outward to steer toward that side, inward to steer the other way. The hidden hand is ignored. An arm hanging at your side doesn't steer. Code: `hands.single` in `BodyTracker.js`, mapping in `Controls.js`.
 - **Trip distance** — top-centre of the game screen; tap it to switch km ⇄ miles. Resets with `R`.
+
+## Settings: vehicle, time of day, weather, season
+
+Choose your **vehicle** on the start screen. Tap **⚙ Settings** (or press <kbd>O</kbd>) at any time — on the Viewer, in solo mode, or on the **Player phone** — to change:
+
+| Setting | Options |
+|---|---|
+| Vehicle | Car · Bike · Bus (switching puts you back at the start; <kbd>B</kbd> cycles, <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> pick) |
+| Time of day | Early morning · Afternoon · Sunset · Evening · Night (headlights switch on after dark) |
+| Weather | Clear · Cloudy · Rain · Fog · Snow |
+| Season | Spring · Summer · Autumn · Winter (grass and tree colours; winter is snow-covered) |
+
+Everything combines freely (e.g. night + fog + winter). Your choices are remembered. On the Player phone the panel sends the change to the Viewer, which applies it and reports back, so both phones always show the same thing.
+
+| | Vehicle feel |
+|---|---|
+| Car | Balanced (the original) |
+| Bike | Light and quick, tight turns, leans into bends |
+| Bus | Heavy, slow to accelerate, long braking distance, wide turning circle, needs bigger steering gestures |
+
+**How it's built:** `VehicleSpecs.js` (vehicles) and `Environment.js` (time / weather / season presets) are plain data; `Settings.js` lists the options the UI is built from; `World.setEnvironment()` applies a look and `Weather.js` draws rain and snow. To add a vehicle: add an entry to `VehicleSpecs.js`, write a `buildX()` in `Models.js` with the same return shape as `buildCar()`, and register it in `BUILDERS` in `Simulator.js`. To add a time or weather: add an entry to `TIMES` / `WEATHERS` in `Environment.js` — the panel picks it up automatically.

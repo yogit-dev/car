@@ -1,5 +1,6 @@
 /**
- * World.js — infinite procedural road, sunset sky, roadside scenery.
+ * World.js — infinite procedural road, sky, roadside scenery. Its look (time of day, weather, season) is set with
+ * setEnvironment(composeEnvironment(...)) — see Environment.js.
  *
  * Everything is rendered RELATIVE TO THE CAR: the car sits at z = 0 and the world streams past toward +z.
  * Each frame the road/ground strips are re-sampled from a deterministic centre-line function c(s), and scenery
@@ -9,7 +10,8 @@
  */
 import * as THREE from 'three';
 
-const HORIZON = new THREE.Color(1.0, 0.66, 0.42);   // sunset horizon; also used as fog colour
+import { Precipitation } from './Weather.js';
+import { composeEnvironment, DEFAULT_ENV } from './Environment.js';
 
 // Road centre-line lives in RoadPath.js (re-exported here so existing imports keep working)
 import { RoadPath } from './RoadPath.js';
@@ -57,12 +59,20 @@ function makeRoadTexture(anisotropy) {
   }, { anisotropy });
 }
 
-function makeGrassTexture(anisotropy) {
+/** Ground texture for each look. 'summer' is the original grass. */
+function makeGroundTexture(kind, anisotropy) {
+  const styles = {
+    summer: { base: '#4f6a2e', blade: (g) => `rgba(${g * 0.7},${g * 1.05},${g * 0.35},0.45)` },
+    spring: { base: '#5f8a34', blade: (g) => `rgba(${g * 0.72},${g * 1.25},${g * 0.4},0.45)` },
+    autumn: { base: '#6a5a2c', blade: (g) => `rgba(${g * 1.25},${g * 0.95},${g * 0.3},0.45)` },
+    snow:   { base: '#e6ebf1', blade: (g) => { const v = 205 + (g - 70) * 0.8; return `rgba(${v},${v + 4},${v + 12},0.5)`; } },
+  };
+  const st = styles[kind] ?? styles.summer;
   const t = canvasTexture(256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#4f6a2e'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = st.base; ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 9000; i++) {
       const g = 70 + Math.random() * 60;
-      ctx.fillStyle = `rgba(${g * 0.7},${g * 1.05},${g * 0.35},0.45)`;
+      ctx.fillStyle = st.blade(g);
       ctx.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random() * 3, 1 + Math.random() * 3);
     }
   }, { anisotropy });
@@ -115,24 +125,25 @@ export class World {
     const aniso = renderer.capabilities.getMaxAnisotropy();
     this.rows = Math.round((BEHIND + AHEAD) / ROW_STEP) + 1;
 
-    scene.background = HORIZON.clone();
-    scene.fog = new THREE.Fog(HORIZON.getHex(), 140, 720);
+    this.aniso = aniso;
+    scene.background = new THREE.Color();
+    scene.fog = new THREE.Fog(0xffffff, 140, 720);
 
-    // lights: low warm sun ahead + cool sky fill
+    // lights (colours/strengths are set by setEnvironment)
     this.sunDir = new THREE.Vector3(0.32, 0.17, -1).normalize();
-    scene.add(new THREE.HemisphereLight(0xffd9b0, 0x3a4a2a, 1.3));
-    const sun = new THREE.DirectionalLight(0xffb98a, 1.8);
-    sun.position.set(-30, 18, -20);                          // low, from ahead-left: warm rim light on trees and the car
-    scene.add(sun);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1);
+    scene.add(this.hemi, this.sun);
 
     this._buildSky();
     this._buildMountains();
 
     // ribbons
-    const roadMat = new THREE.MeshLambertMaterial({ map: makeRoadTexture(aniso) });
-    const grassTex = makeGrassTexture(aniso);
-    const grassMat = new THREE.MeshLambertMaterial({ map: grassTex });
-    const gravelMat = new THREE.MeshLambertMaterial({ color: 0x7a6b58 });
+    this.roadMat = new THREE.MeshLambertMaterial({ map: makeRoadTexture(aniso) });
+    this.groundTex = {};
+    this.grassMat = new THREE.MeshLambertMaterial({ map: this._groundTexture('summer') });
+    this.gravelMat = new THREE.MeshLambertMaterial({ color: 0x7a6b58 });
+    const roadMat = this.roadMat, grassMat = this.grassMat, gravelMat = this.gravelMat;
     this.road = new Ribbon(this.rows, 2, roadMat);
     this.shoulderL = new Ribbon(this.rows, 2, gravelMat);
     this.shoulderR = new Ribbon(this.rows, 2, gravelMat);
@@ -141,24 +152,68 @@ export class World {
     for (const r of [this.road, this.shoulderL, this.shoulderR, this.groundL, this.groundR]) scene.add(r.mesh);
 
     this._buildScenery();
+    this.precip = new Precipitation(scene);
+    this.leaf = { h: [0.24, 0.32], s: [0.38, 0.58], l: [0.2, 0.3], frost: 0 };
+    this.setEnvironment(composeEnvironment(DEFAULT_ENV));
     this.update(0);
   }
 
+  _groundTexture(kind) { return (this.groundTex[kind] ??= makeGroundTexture(kind, this.aniso)); }
+
+  /** Apply a description from composeEnvironment(): sky, fog, lights, ground, tree colours, rain/snow. */
+  setEnvironment(e) {
+    this.env = e;
+    const u = this.sky.material.uniforms, sk = e.sky;
+    u.horizonC.value.fromArray(sk.horizon); u.midC.value.fromArray(sk.mid); u.zenithC.value.fromArray(sk.zenith);
+    u.glowC.value.fromArray(sk.glow); u.glowK.value = sk.glowK; u.discC.value.fromArray(sk.disc);
+    u.sunVis.value = sk.sunVis; u.stars.value = sk.stars;
+    this.sunDir.fromArray(sk.sunDir).normalize();
+
+    this.scene.background.fromArray(e.fog.color);
+    this.scene.fog.color.fromArray(e.fog.color); this.scene.fog.near = e.fog.near; this.scene.fog.far = e.fog.far;
+
+    this.hemi.color.fromArray(e.hemi.sky); this.hemi.groundColor.fromArray(e.hemi.ground); this.hemi.intensity = e.hemi.intensity;
+    this.sun.color.fromArray(e.sun.color); this.sun.intensity = e.sun.intensity; this.sun.position.fromArray(e.sun.pos);
+
+    this.mountainMats[0].color.fromArray(e.mountains[0]); this.mountainMats[1].color.fromArray(e.mountains[1]);
+
+    this.grassMat.map = this._groundTexture(e.ground); this.grassMat.needsUpdate = true;
+    this.roadMat.color.fromArray(e.road.tint); this.roadMat.emissive.fromArray(e.road.emissive);
+    this.gravelMat.color.fromArray(e.shoulder);
+
+    this.leaf = e.leaf;
+    this.precip.setMode(e.precip);
+  }
+
+  /** Per-frame rain / snow. Call after update() with the camera and the car's speed (m/s). */
+  stepWeather(dt, camera, speed) { this.precip.update(dt, camera.position, speed); }
+
   _buildSky() {
+    const V3 = (a, b, c) => new THREE.Vector3(a, b, c);
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { sunDir: { value: this.sunDir } },
+      uniforms: {
+        sunDir: { value: this.sunDir },
+        horizonC: { value: V3(1.0, 0.66, 0.42) }, midC: { value: V3(0.86, 0.42, 0.38) }, zenithC: { value: V3(0.10, 0.15, 0.40) },
+        glowC: { value: V3(1.0, 0.72, 0.40) }, glowK: { value: 0.55 }, discC: { value: V3(1.0, 0.96, 0.85) },
+        sunVis: { value: 1 }, stars: { value: 0 },
+      },
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: `
-        uniform vec3 sunDir; varying vec3 vDir;
+        uniform vec3 sunDir, horizonC, midC, zenithC, glowC, discC; uniform float glowK, sunVis, stars; varying vec3 vDir;
+        float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         void main(){
           vec3 d = normalize(vDir);
           float h = clamp(d.y, -0.1, 1.0);
-          vec3 horizon = vec3(1.0, 0.66, 0.42), mid = vec3(0.86, 0.42, 0.38), zenith = vec3(0.10, 0.15, 0.40);
-          vec3 col = mix(horizon, mid, smoothstep(0.0, 0.16, h));
-          col = mix(col, zenith, smoothstep(0.10, 0.80, h));
+          vec3 col = mix(horizonC, midC, smoothstep(0.0, 0.16, h));
+          col = mix(col, zenithC, smoothstep(0.10, 0.80, h));
           float sd = max(dot(d, normalize(sunDir)), 0.0);
-          col += vec3(1.0, 0.72, 0.40) * pow(sd, 10.0) * 0.55 + vec3(1.0, 0.96, 0.85) * smoothstep(0.9992, 0.9997, sd) * 1.6;
+          col += glowC * pow(sd, 10.0) * glowK * sunVis + discC * smoothstep(0.9992, 0.9997, sd) * 1.6 * sunVis;
+          if (stars > 0.0 && d.y > 0.05) {
+            vec2 p = vec2(atan(d.x, d.z), d.y) * 150.0;
+            float s = step(0.993, h21(floor(p))) * (1.0 - smoothstep(0.0, 0.4, length(fract(p) - 0.5)));
+            col += vec3(0.9, 0.95, 1.0) * s * stars * smoothstep(0.05, 0.35, d.y);
+          }
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
@@ -171,6 +226,7 @@ export class World {
     this.mountains = new THREE.Group();
     const mat = new THREE.MeshBasicMaterial({ color: 0x5b3f63, fog: false });
     const mat2 = new THREE.MeshBasicMaterial({ color: 0x7a4a5a, fog: false });
+    this.mountainMats = [mat, mat2];       // [darker, lighter] — recoloured by setEnvironment
     for (let i = 0; i < 26; i++) {
       const a = (i / 26) * Math.PI * 2, h = 150 + hash(i, 1) * 300, r = 220 + hash(i, 2) * 200;
       const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5 + (i % 3)), i % 2 ? mat : mat2);
@@ -251,7 +307,11 @@ export class World {
           d.scale.set(sc, sc * (0.9 + hash(salt, 10) * 0.4), sc);
           d.updateMatrix();
           this.trunks.setMatrixAt(i, d.matrix); this.leaves.setMatrixAt(i, d.matrix);
-          col.setHSL(0.24 + hash(salt, 11) * 0.08, 0.38 + hash(salt, 12) * 0.2, 0.2 + hash(salt, 13) * 0.1);
+          const lf = this.leaf, fr = lf.frost;
+          const hh = lf.h[0] + hash(salt, 11) * (lf.h[1] - lf.h[0]);
+          const ss = (lf.s[0] + hash(salt, 12) * (lf.s[1] - lf.s[0])) * (1 - fr * 0.7);
+          const ll = lf.l[0] + hash(salt, 13) * (lf.l[1] - lf.l[0]);
+          col.setHSL(hh, ss, ll + (0.86 - ll) * fr);                  // frost = snow on the branches
           this.leaves.setColorAt(i, col);
         }
       }

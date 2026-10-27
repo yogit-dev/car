@@ -135,6 +135,26 @@
     #cluster { transform: translateX(-50%) scale(.82); transform-origin: bottom center; }
   }
 
+  /* settings panel (⚙) */
+  #settings { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 14px; background: rgba(5,6,9,.6); }
+  #settingsCard { width: min(620px, 100%); max-height: min(92vh, 100%); overflow: auto; padding: 18px 20px 20px; -webkit-user-select: none; user-select: none; }
+  #settingsHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  #settingsHead h1 { margin: 0; font: 700 34px/1 var(--display); letter-spacing: .02em; text-transform: uppercase; }
+  #settingsBody h2 { margin: 16px 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { all: unset; cursor: pointer; box-sizing: border-box; min-height: 46px; padding: 8px 14px; border-radius: 11px; border: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 8px; font: 600 19px var(--display); letter-spacing: .03em; touch-action: manipulation; }
+  .chip .ic { font-size: 22px; line-height: 1; }
+  .chip:hover { border-color: var(--amber); }
+  .chip:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .chip[aria-pressed="true"] { border-color: var(--amber); background: rgba(255,180,84,.16); color: var(--amber); }
+  body[data-role="player"] #btnSettings { min-height: 52px; font-size: 22px; padding: 8px 22px; border-radius: 14px; }
+
+  /* vehicle chooser (car / bike / bus) */
+  #vehicles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 0; }
+  #vehiclesTitle { margin-top: 22px; }
+  #start.locked #vehicles, #start.locked #vehiclesTitle { display: none; }
+
   /* mode chooser (solo / player / viewer) */
   #modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
   .mode { all: unset; cursor: pointer; box-sizing: border-box; padding: 12px 14px; border-radius: 11px; border: 1px solid var(--line); display: grid; gap: 3px; }
@@ -217,8 +237,16 @@
 
 <div id="bar">
   <button class="btn" id="btnCamView">View · V</button>
+  <button class="btn" id="btnSettings" title="Settings (O)">⚙ Settings</button>
   <button class="btn" id="btnHelp">Help</button>
   <button class="btn" id="apBtn" aria-pressed="false" title="Auto-pilot (P)"><span class="dot"></span><span>Auto-pilot</span><span class="st" id="apState">OFF</span></button>
+</div>
+
+<div id="settings" hidden>
+  <div id="settingsCard" class="glass" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div id="settingsHead"><h1 id="settingsTitle">Settings</h1><button class="primary" id="btnSettingsClose" style="padding:9px 20px;font-size:20px">Done</button></div>
+    <div id="settingsBody"></div>
+  </div>
 </div>
 
 <div id="calib">
@@ -250,11 +278,18 @@
           <tr><td>Throttle</td><td>Lift your <b>right</b> foot (knee up)</td></tr>
           <tr><td>Brake</td><td>Lift the right foot and sweep it toward your centre</td></tr>
           <tr><td>Auto-pilot</td><td>Tap the <b>Auto-pilot</b> button on the player phone (or <kbd>P</kbd>). It drives flat out and brakes for bends. Brake to take over</td></tr>
+          <tr><td>Settings</td><td>Tap <b>⚙ Settings</b> (or <kbd>O</kbd>) to change vehicle, time of day, weather and season — on either phone. A new vehicle puts you back at the start</td></tr>
           <tr><td>Gears</td><td>Automatic: the car changes gear for you</td></tr>
           <tr><td>Keyboard</td><td><kbd>←</kbd><kbd>→</kbd> steer · <kbd>↑</kbd> throttle · <kbd>↓</kbd> brake</td></tr>
-          <tr><td>Other keys</td><td><kbd>V</kbd> view · <kbd>P</kbd> auto-pilot · <kbd>C</kbd> calibrate · <kbd>R</kbd> reset · <kbd>H</kbd> debug</td></tr>
+          <tr><td>Other keys</td><td><kbd>V</kbd> view · <kbd>P</kbd> auto-pilot · <kbd>C</kbd> calibrate · <kbd>R</kbd> reset · <kbd>B</kbd> next vehicle · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> vehicle · <kbd>O</kbd> settings · <kbd>H</kbd> debug</td></tr>
         </table>
       </div>
+    </div>
+    <h2 id="vehiclesTitle">Vehicle</h2>
+    <div id="vehicles" role="group" aria-label="Choose your vehicle">
+      <button class="mode" data-setting="vehicle" data-value="car" aria-pressed="true"><b>Car</b><span>Balanced and easy to drive</span></button>
+      <button class="mode" data-setting="vehicle" data-value="bike" aria-pressed="false"><b>Bike</b><span>Light, fast and twitchy — leans into bends</span></button>
+      <button class="mode" data-setting="vehicle" data-value="bus" aria-pressed="false"><b>Bus</b><span>Heavy and steady — plan your braking</span></button>
     </div>
     <div id="modes" role="group" aria-label="How do you want to play?">
       <button class="mode" id="modeSolo" aria-pressed="true"><b>Solo</b><span>One device: camera and game together</span></button>

@@ -10,13 +10,27 @@
 import * as THREE from 'three';
 import { Vehicle } from './Vehicle.js';
 import { World, RoadPath } from './World.js';
-import { buildCar, buildSteeringWheel, buildPedals, makeLabel } from './Models.js';
+import { buildCar, buildBike, buildBus, buildSteeringWheel, buildPedals, makeLabel } from './Models.js';
+import { VEHICLES, isVehicleType } from './VehicleSpecs.js';
+import { composeEnvironment } from './Environment.js';
+import { DEFAULT_SETTINGS, normalizeSettings, pickValid, envChanged } from './Settings.js';
+
+const BUILDERS = { car: buildCar, bike: buildBike, bus: buildBus };
+
+/** Free GPU memory of a model we are throwing away (geometries, materials, canvas textures). */
+function disposeTree(obj) {
+  obj.traverse((o) => {
+    o.geometry?.dispose();
+    for (const m of [].concat(o.material ?? [])) { m.map?.dispose(); m.dispose(); }
+  });
+}
 
 const STEER_VISUAL = 2.3;            // wheel rotation (rad) at full lock ≈ 130°
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 export class Simulator {
-  constructor(canvas) {
+  /** @param {{vehicle?:string, time?:string, weather?:string, season?:string}} settings */
+  constructor(canvas, settings = DEFAULT_SETTINGS) {
     this.canvas = canvas;
     const renderer = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -27,9 +41,7 @@ export class Simulator {
     this.path = new RoadPath();
     this.world = new World(this.scene, this.path, renderer);
 
-    this.car = buildCar();
-    this.scene.add(this.car.root);
-    this.vehicle = new Vehicle();
+    this.car = null;
     this.cameraMode = 'chase';          // 'chase' | 'cockpit'
     this.hudVisible = true;
     this.events = [];
@@ -38,7 +50,9 @@ export class Simulator {
     this._camInit = false;
 
     this._buildHud();
-    this.reset();
+    this.settings = normalizeSettings(settings);
+    this.world.setEnvironment(composeEnvironment(this.settings));
+    this.setVehicle(this.settings.vehicle);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -71,6 +85,48 @@ export class Simulator {
     this.hudCam.position.set(0, 0, 2.75);
   }
 
+  /**
+   * Apply a (partial) settings change: vehicle, time, weather and/or season. A new vehicle puts the car back at the
+   * start of the road. Returns which parts actually changed.
+   */
+  applySettings(partial) {
+    const next = normalizeSettings({ ...this.settings, ...pickValid(partial) });   // invalid values are ignored, not reset
+    const vehicleChanged = next.vehicle !== this.settings.vehicle;
+    const environmentChanged = envChanged(next, this.settings);
+    this.settings = next;
+    if (vehicleChanged) this.setVehicle(next.vehicle);
+    if (environmentChanged) { this.world.setEnvironment(composeEnvironment(next)); this._applyHeadlights(); }
+    return { vehicle: vehicleChanged, environment: environmentChanged };
+  }
+
+  /** Swap the vehicle (model + physics + camera). The car is put back at the start of the road. */
+  setVehicle(type) {
+    if (!isVehicleType(type)) return false;
+    if (this.car) { this.scene.remove(this.car.root); disposeTree(this.car.root); }
+    this.type = type;
+    this.settings = { ...this.settings, vehicle: type };
+    this.spec = VEHICLES[type];
+    this.car = BUILDERS[type]();
+    this.scene.add(this.car.root);
+
+    // headlights: a spot light on the front of the vehicle, switched on by the time of day / weather
+    const front = new THREE.Box3().setFromObject(this.car.root).min.z;
+    this.headlight = new THREE.SpotLight(0xfff1cf, 0, 75, 0.5, 0.65, 0);
+    this.headlight.position.set(0, 0.9, front + 0.2);
+    this.headlight.target.position.set(0, 0.2, front - 30);
+    this.car.root.add(this.headlight, this.headlight.target);
+    this._applyHeadlights();
+
+    this.vehicle = new Vehicle(this.spec.physics);
+    this.reset();
+    return true;
+  }
+
+  _applyHeadlights() {
+    const k = this.world.env?.headlights ?? 0;
+    if (this.headlight) this.headlight.intensity = k * 10;
+  }
+
   reset() {
     this.vehicle.reset({ x: 0, yaw: this.path.heading(0) });
     this._camInit = false;
@@ -91,7 +147,7 @@ export class Simulator {
 
   /** Advance physics by dt and pose every visual. */
   update(dt, input) {
-    const v = this.vehicle, car = this.car;
+    const v = this.vehicle, car = this.car, b = this.spec.body;
     this.time += dt;
     v.step(dt, input, this.path);
     this.events = v.events.slice();
@@ -101,11 +157,11 @@ export class Simulator {
     car.root.rotation.y = -v.yaw;
     const bump = v.offRoad ? Math.sin(this.time * 55) * 0.012 * clamp(v.speed / 15, 0, 1.5) : 0;
     car.chassis.position.y = bump;
-    car.chassis.rotation.x += (clamp(v.longAcc * 0.0035, -0.05, 0.05) - car.chassis.rotation.x) * Math.min(1, dt * 6);   // squat / dive
-    car.chassis.rotation.z += (clamp(v.latAcc * 0.0028, -0.06, 0.06) - car.chassis.rotation.z) * Math.min(1, dt * 6);    // body roll
+    car.chassis.rotation.x += (clamp(v.longAcc * b.pitchK, -b.pitchMax, b.pitchMax) - car.chassis.rotation.x) * Math.min(1, dt * 6);   // squat / dive
+    car.chassis.rotation.z += (clamp(v.latAcc * b.rollK, -b.rollMax, b.rollMax) - car.chassis.rotation.z) * Math.min(1, dt * 6);    // body roll
     for (const w of car.wheels) {
       w.spin.rotation.x = -v.wheelSpin;
-      if (w.front) w.pivot.rotation.y = -v.steerAngle * 1.6;                 // exaggerated so steering reads from behind
+      if (w.front) w.pivot.rotation.y = -v.steerAngle * this.spec.wheelSteerVisual;                 // exaggerated so steering reads from behind
     }
 
     // wheel + pedals (cockpit wheel, HUD wheel, HUD pedals)
@@ -113,11 +169,13 @@ export class Simulator {
     car.cockpit.wheel.setAngle(a);
     this.hudWheel.setAngle(a);
     this.hudPedals.set({ brake: input.brake, accelerator: input.throttle });
-    car.cockpit.updateCluster({ kmh: v.kmh, gear: v.engineOn ? v.gear : 'X', rpm: v.rpm, redline: v.p.redline, mode: v.mode });
+    car.cockpit.updateCluster({ kmh: v.kmh, gear: v.engineOn ? v.gear : 'X', rpm: v.rpm, redline: v.p.redline, mode: this.type === 'car' ? v.mode : this.spec.label });
 
     this.world.update(v.s, this.camera);
     this._updateCamera(dt);
+    this.world.stepWeather(dt, this.camera, v.speed);
     car.cockpit.group.visible = true;
+    for (const o of car.hideInCockpit ?? []) o.visible = this.cameraMode !== 'cockpit';
   }
 
   _updateCamera(dt) {
@@ -128,13 +186,14 @@ export class Simulator {
     if (this.cameraMode === 'cockpit') {
       const eye = car.cockpit.eye.clone(); eye.x -= v.latAcc * 0.004;
       cam.position.copy(car.chassis.localToWorld(eye));
-      cam.lookAt(car.chassis.localToWorld(new THREE.Vector3(-0.4, 1.22, -20)));
+      cam.lookAt(car.chassis.localToWorld(car.cockpit.look.clone()));
       cam.rotation.z += 0;                                     // keep horizon level
       cam.fov += ((78 + speedFrac * 8) - cam.fov) * Math.min(1, dt * 3);
     } else {
       const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
-      const targetPos = new THREE.Vector3(v.x - sy * 7.6, 2.9 + speedFrac * 0.3, cy * 7.6);
-      const targetLook = new THREE.Vector3(v.x + sy * 10, 1.15, -cy * 10);
+      const c = this.spec.chase;
+      const targetPos = new THREE.Vector3(v.x - sy * c.back, c.height + speedFrac * 0.3, cy * c.back);
+      const targetLook = new THREE.Vector3(v.x + sy * c.lookAhead, c.lookHeight, -cy * c.lookAhead);
       if (!this._camInit) { this._camPos.copy(targetPos); this._camLook.copy(targetLook); this._camInit = true; }
       const k = 1 - Math.exp(-5.5 * dt);
       this._camPos.lerp(targetPos, k); this._camLook.lerp(targetLook, 1 - Math.exp(-9 * dt));

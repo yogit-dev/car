@@ -36,18 +36,24 @@ export class Autopilot {
 
   disengage() { this.on = false; this._i = 0; }
 
+  /** Braking the plan can count on: the usual 5 m/s², or less for a vehicle that cannot stop that hard. */
+  _plan(v) {
+    const cap = v.p?.brakeForce && v.p?.mass ? (0.8 * v.p.brakeForce) / v.p.mass : Infinity;
+    return Math.min(this.c.brakePlan, cap);
+  }
+
   /**
    * The fastest speed that is still safe right now: for every bend up to a braking distance ahead, how fast
    * could we be going here and still slow down to that bend's limit in time? No bend ahead → no limit.
    */
   targetSpeed(v, road) {
-    const c = this.c;
-    const reach = (v.speed * v.speed) / (2 * c.brakePlan) + 40;
+    const c = this.c, plan = this._plan(v);
+    const reach = (v.speed * v.speed) / (2 * plan) + 40;
     let allowed = Infinity;
     for (let d = 0; d <= reach; d += 12) {
       const curv = Math.abs(road.heading(v.s + d + 25) - road.heading(v.s + d)) / 25;     // rad per metre
       const bendLimit = Math.max(Math.sqrt(c.lateralG / Math.max(curv, 1e-4)), 8);
-      allowed = Math.min(allowed, Math.sqrt(bendLimit * bendLimit + 2 * c.brakePlan * d));
+      allowed = Math.min(allowed, Math.sqrt(bendLimit * bendLimit + 2 * plan * d));
     }
     return allowed;
   }
@@ -64,7 +70,7 @@ export class Autopilot {
       const feedForward = ((road.heading(v.s + 5) - road.heading(v.s)) / 5) * speed; // follow the bend itself
       const wantYawRate = c.yawGain * (wantYaw - v.yaw) + feedForward;
       const wantAngle = Math.atan((wantYawRate * v.p.wheelBase) / speed);
-      const maxSteer = 0.45 / (1 + (speed / 8) ** 2);                               // same law as Vehicle.step
+      const maxSteer = (v.p?.maxSteerAngle ?? 0.45) / (1 + (speed / (v.p?.steerSpeedRef ?? 8)) ** 2);   // same law as Vehicle.step
       steer = clamp(wantAngle / maxSteer, -1, 1);
     }
 

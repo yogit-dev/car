@@ -32,6 +32,8 @@ export class Vehicle {
       brakeForce: 11500,     // N at full pedal (≈ 0.94 g)
       tractionLimit: 6800,   // N the driven wheels can put down
       gripG: 0.95,
+      maxSteerAngle: 0.45,   // rad of front-wheel lock at walking pace
+      steerSpeedRef: 8,      // m/s at which the lock has halved (steering gets less sensitive with speed)
       ...params,
     };
     this.mode = 'auto';             // the game plays as an automatic: no clutch or gear keys needed
@@ -169,7 +171,7 @@ export class Vehicle {
 
     // ── Lateral dynamics (bicycle model) ──
     this.steerState += (steer - this.steerState) * Math.min(1, dt * 12);
-    const maxSteer = 0.45 / (1 + (this.speed / 8) ** 2);                      // steering gets less sensitive with speed
+    const maxSteer = p.maxSteerAngle / (1 + (this.speed / p.steerSpeedRef) ** 2);   // steering gets less sensitive with speed
     this.steerAngle = this.steerState * maxSteer;
     let yawRate = (this.speed / p.wheelBase) * Math.tan(this.steerAngle);
     const grip = p.gripG * G * (this.offRoad ? 0.65 : 1);

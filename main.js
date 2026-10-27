@@ -6,6 +6,8 @@ import { BodyTracker, CameraError } from './BodyTracker.js';
 import { Simulator } from './Simulator.js';
 import { InputMapper } from './Controls.js';
 import { Autopilot } from './Autopilot.js';
+import { VEHICLES, VEHICLE_TYPES } from './VehicleSpecs.js';
+import { DEFAULT_SETTINGS, SETTING_GROUPS, normalizeSettings, pickValid } from './Settings.js';
 import { ViewerLink, PlayerLink, LinkError, normalizeCode, joinUrl, CODE_LEN } from './Link.js';
 
 const $ = (id) => document.getElementById(id);
@@ -16,14 +18,25 @@ const store = {
 };
 
 // ───────────────────────────── core objects ─────────────────────────────
+const SETTINGS_KEY = 'bodydrive.settings.v1', OLD_VEHICLE_KEY = 'bodydrive.vehicle';
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+    if (saved) return normalizeSettings(saved);
+    return normalizeSettings({ vehicle: localStorage.getItem(OLD_VEHICLE_KEY) });      // from before the settings panel existed
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ } };
+let settings = loadSettings();         // vehicle, time, weather, season — on the Player phone this mirrors the Viewer's
 let sim;
-try { sim = new Simulator($('scene')); }
+try { sim = new Simulator($('scene'), settings); }
 catch (e) {
   console.error(e);
   document.body.innerHTML = '<div style="position:fixed;inset:0;display:grid;place-items:center;padding:24px;text-align:center;background:#0b0d12;color:#fff;font:18px/1.5 system-ui,sans-serif"><div><h1>3D graphics unavailable</h1><p>Body Drive needs WebGL. Enable hardware acceleration in your browser settings, or try a current version of Chrome, Edge, Safari or Firefox.</p></div></div>';
   throw e;
 }
 const mapper = new InputMapper();
+mapper.useVehicle(VEHICLES[settings.vehicle].mapping);
 mapper.attachKeyboard();
 let tracker = null;
 let lastPose = null;
@@ -109,7 +122,9 @@ $('btnCamera').addEventListener('click', async () => {
 });
 
 // ───────────────────────────── player / viewer (two-device mode) ─────────────────────────────
+let startMode = 'solo';      // which tab of the start screen is open
 function selectMode(m) {
+  startMode = m;
   for (const [k, id] of [['solo', 'Solo'], ['player', 'Player'], ['viewer', 'Viewer']]) {
     $(`mode${id}`).setAttribute('aria-pressed', String(k === m));
     $(`panel${id}`).hidden = k !== m;
@@ -151,12 +166,13 @@ function onLinkStatus(s) {
   renderLink(s);
   if (s.state === prevLinkState) return;
   if (role === 'viewer') {
-    if (s.state === 'connected') { toast('Player connected', 'ok'); link?.send({ t: 'ap', on: ap.on }); }
+    if (s.state === 'connected') { toast('Player connected', 'ok'); link?.send({ t: 'ap', on: ap.on }); link?.send({ t: 'settings', s: settings }); }
     else if (s.state === 'waiting' && prevLinkState === 'connected') { toast('Player disconnected', 'warn'); mapper.setPose(null); lastPose = null; }
     $('trackState').dataset.state = s.state === 'connected' ? 'running' : 'starting';
   } else if (role === 'player') {
     if (s.state === 'disconnected') toast('Lost the viewer — reconnecting…', 'warn');
     else if (s.state === 'connected' && prevLinkState === 'disconnected') toast('Reconnected to viewer', 'ok');
+    if (s.state === 'connected') flushPendingSettings();
   }
   prevLinkState = s.state;
 }
@@ -230,6 +246,7 @@ function onLinkPose(p) {
 }
 function onViewerMessage(m) {
   if (m.t === 'cmd' && m.c === 'autopilot') { setAutopilot(!!m.on); return; }
+  if (m.t === 'cmd' && m.c === 'settings') { onSettingsCommand(m.s); return; }
   if (m.t !== 'calib') return;
   if (m.end) { calibHide(); if (m.ok) toast('Calibrated — your rest pose is now zero', 'ok'); else toast(m.reason || 'Calibration failed', 'warn'); }
   else if (m.progress != null) $('calibBar').style.width = `${Math.round(m.progress * 100)}%`;
@@ -239,6 +256,7 @@ function onViewerMessage(m) {
 // Player side: commands from the viewer
 function onPlayerMessage(m) {
   if (m.t === 'cmd' && m.c === 'calibrate') runCalibration();
+  else if (m.t === 'settings') onSettingsReport(m.s);
   else if (m.t === 'ap') { const was = apOn; showAp(!!m.on); if (was !== apOn) toast(apOn ? 'Auto-pilot ON' : 'Auto-pilot off', apOn ? 'ok' : ''); }
 }
 
@@ -399,6 +417,86 @@ $('odo').addEventListener('click', () => {
 });
 renderOdo();
 
+
+// ───────────────────────────── settings: vehicle, time of day, weather, season ─────────────────────────────
+// Every choice (start screen, ⚙ panel, keys) goes through changeSetting(). On the Viewer / solo it is applied to the
+// simulator. The Player phone has no 3D view, so it forwards the change to the Viewer, which applies it and answers
+// with the full settings — that answer is what the phone's buttons then show.
+let pendingSettings = {};               // player phone: changes made before the viewer was connected
+
+function syncSettingsUi() {
+  for (const b of document.querySelectorAll('[data-setting]')) b.setAttribute('aria-pressed', String(settings[b.dataset.setting] === b.dataset.value));
+}
+
+function buildSettingsPanel() {
+  const body = $('settingsBody');
+  for (const g of SETTING_GROUPS) {
+    const h = document.createElement('h2'); h.textContent = g.title;
+    const row = document.createElement('div'); row.className = 'chips'; row.setAttribute('role', 'group'); row.setAttribute('aria-label', g.title);
+    for (const o of g.options) {
+      const b = document.createElement('button');
+      b.className = 'chip'; b.dataset.setting = g.key; b.dataset.value = o.id; b.setAttribute('aria-pressed', 'false');
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = o.icon;
+      const tx = document.createElement('span'); tx.textContent = o.label;
+      b.append(ic, tx); row.append(b);
+    }
+    body.append(h, row);
+  }
+}
+
+function applyToSim(clean) {
+  const res = sim.applySettings(clean);
+  settings = { ...sim.settings };
+  if (res.vehicle) {
+    if (ap.on) setAutopilot(false, 'vehicle changed');
+    mapper.useVehicle(VEHICLES[settings.vehicle].mapping);
+    tripM = 0; renderOdo();
+  }
+  return res;
+}
+
+function changeSetting(partial, { silent = false } = {}) {
+  const clean = pickValid(partial);
+  if (!Object.keys(clean).length) return;
+  const asPlayer = role === 'player' || (startMode === 'player' && !$('start').classList.contains('gone'));   // phone with no 3D view
+  if (asPlayer) {
+    settings = { ...settings, ...clean };
+    if (!link?.send({ t: 'cmd', c: 'settings', s: clean })) pendingSettings = { ...pendingSettings, ...clean };
+    saveSettings(); syncSettingsUi();
+    return;
+  }
+  const res = applyToSim(clean);
+  saveSettings(); syncSettingsUi();
+  if (role === 'viewer') link?.send({ t: 'settings', s: settings });
+  if (!silent && (res.vehicle || res.environment)) {
+    const names = SETTING_GROUPS.filter((g) => g.key in clean).map((g) => g.options.find((o) => o.id === clean[g.key])?.label);
+    toast(res.vehicle ? `${VEHICLES[settings.vehicle].label} — ${VEHICLES[settings.vehicle].blurb}` : names.join(' · '), 'ok');
+  }
+}
+
+// start screen + settings panel buttons all carry data-setting / data-value
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-setting]');
+  if (b) changeSetting({ [b.dataset.setting]: b.dataset.value });
+});
+function cycleVehicle() { changeSetting({ vehicle: VEHICLE_TYPES[(VEHICLE_TYPES.indexOf(settings.vehicle) + 1) % VEHICLE_TYPES.length] }); }
+
+// the ⚙ panel
+function openSettings() { syncSettingsUi(); $('settings').hidden = false; $('btnSettingsClose').focus(); }
+function closeSettings() { $('settings').hidden = true; }
+buildSettingsPanel();
+$('btnSettings').addEventListener('click', openSettings);
+$('btnSettingsClose').addEventListener('click', closeSettings);
+$('settings').addEventListener('click', (e) => { if (e.target === $('settings')) closeSettings(); });   // tap outside the card
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('settings').hidden) closeSettings(); });
+
+// incoming: viewer applies what the phone asked for; phone shows what the viewer reports
+function onSettingsCommand(s) { changeSetting(s); }
+function onSettingsReport(s) { settings = normalizeSettings(s); saveSettings(); syncSettingsUi(); }
+function flushPendingSettings() {
+  if (role === 'player' && Object.keys(pendingSettings).length && link?.send({ t: 'cmd', c: 'settings', s: pendingSettings })) pendingSettings = {};
+}
+
 // ───────────────────────────── keyboard actions ─────────────────────────────
 mapper.onAction = (name) => {
   switch (name) {
@@ -407,6 +505,9 @@ mapper.onAction = (name) => {
     case 'reset': if (role === 'player') break; setAutopilot(false); sim.reset(); tripM = 0; renderOdo(); toast('Car reset'); break;
     case 'debug': $('debug').hidden = !$('debug').hidden; break;
     case 'autopilot': toggleAutopilot(); break;
+    case 'vehicle': cycleVehicle(); break;
+    case 'settings': $('settings').hidden ? openSettings() : closeSettings(); break;
+    default: if (name.startsWith('vehicle:')) changeSetting({ vehicle: name.slice(8) });
   }
 };
 
@@ -425,7 +526,7 @@ function updateHud(dt, input) {
   const f = Math.min(1, v.rpm / v.p.redline);
   el.rpm.style.width = `${(f * 100).toFixed(0)}%`;
   el.rpm.classList.toggle('hot', f > 0.85);
-  el.mode.textContent = ap.on ? 'AUTO-PILOT' : MODE_NAMES[v.mode];
+  el.mode.textContent = `${VEHICLES[settings.vehicle].label.toUpperCase()} · ${ap.on ? 'AUTO-PILOT' : MODE_NAMES[v.mode]}`;
   el.mode.classList.toggle('ap', ap.on);
   renderOdo();
   el.src.textContent = `steer: ${input.sources.steer} · pedals: ${input.sources.pedals}`;
@@ -452,6 +553,8 @@ function updateHud(dt, input) {
     ].join('\n');
   }
 }
+
+syncSettingsUi();
 
 // ───────────────────────────── main loop ─────────────────────────────
 let prev = performance.now();

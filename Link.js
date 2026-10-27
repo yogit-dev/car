@@ -11,6 +11,8 @@
  *   Viewer → Player   { t: 'cmd', c: 'calibrate' }
  *   Player → Viewer   { t: 'cmd', c: 'autopilot', on: bool }     (tap on the phone)
  *   Viewer → Player   { t: 'ap', on: bool }                       (current auto-pilot state, so the phone button matches)
+ *   Player → Viewer   { t: 'cmd', c: 'settings', s: {vehicle?, time?, weather?, season?} }   (⚙ panel on the phone)
+ *   Viewer → Player   { t: 'settings', s: {vehicle, time, weather, season} }                 (the full current settings)
  *
  * The Peer constructor is injected so the logic can be unit-tested without a browser.
  */

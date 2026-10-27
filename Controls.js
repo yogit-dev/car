@@ -35,6 +35,7 @@ const shape = (v, dz, expo) => {
 
 export class InputMapper {
   constructor(mapping = {}) {
+    this.base = mapping;
     this.m = { ...DEFAULT_MAPPING, ...mapping };
     this.keys = new Set();
     this.pose = null; this.poseAt = 0;
@@ -49,12 +50,17 @@ export class InputMapper {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)) return;   // typing the join code, etc.
       if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser shortcuts (Ctrl+R, Ctrl+C, Cmd+V...) alone
       this.keys.add(e.code);
-      const act = { KeyV: 'camera', KeyC: 'calibrate', KeyR: 'reset', KeyH: 'debug', KeyP: 'autopilot' }[e.code];
+      const act = { KeyV: 'camera', KeyC: 'calibrate', KeyR: 'reset', KeyH: 'debug', KeyP: 'autopilot', KeyB: 'vehicle', KeyO: 'settings', Digit1: 'vehicle:car', Digit2: 'vehicle:bike', Digit3: 'vehicle:bus' }[e.code];
       if (act) this.onAction?.(act);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();   // stop the page scrolling
     };
     this._up = (e) => this.keys.delete(e.code);
     this._blur = () => this.keys.clear();
+  }
+
+  /** Per-vehicle feel (a heavy bus needs bigger movements and responds slower). Pass {} to go back to the defaults. */
+  useVehicle(overrides = {}) {
+    this.m = { ...DEFAULT_MAPPING, ...this.base, ...overrides };
   }
 
   attachKeyboard(target = window) {
