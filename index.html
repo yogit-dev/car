@@ -176,7 +176,7 @@
   #link { position: fixed; top: 112px; left: 50%; transform: translateX(-50%); z-index: 25; padding: 12px 20px; text-align: center; max-width: min(92vw, 520px); }
   #linkState { font: 600 13px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--amber); }
   #link.ok #linkState { color: var(--green); }
-  #linkCode { display: none;  font: 700 54px/1.1 var(--mono); letter-spacing: .18em; padding-left: .18em; -webkit-user-select: text; user-select: text; }
+  #linkCode { font: 700 54px/1.1 var(--mono); letter-spacing: .18em; padding-left: .18em; -webkit-user-select: text; user-select: text; }
   #linkHelp { font: 500 16px/1.3 var(--display); color: var(--dim); margin-top: 4px; }
   #linkRow { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
   #link.compact #linkCode { font-size: 20px; }
@@ -246,7 +246,6 @@
   <div id="settingsCard" class="glass" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div id="settingsHead"><h1 id="settingsTitle">Settings</h1><button class="primary" id="btnSettingsClose" style="padding:9px 20px;font-size:20px">Done</button></div>
     <div id="settingsBody"></div>
-    <section id="roomSettings" aria-live="polite"><h2>Multiplayer room</h2><p id="roomSettingsState">Not in a room</p><div id="roomSettingsCode" style="font:700 30px var(--mono);letter-spacing:.2em;color:var(--amber);user-select:text">—</div><p style="color:var(--dim);font:14px var(--mono)">Room code is only shown here in Settings. Share it with one friend.</p><button class="btn" id="btnCopyRoom">Copy room code</button></section>
   </div>
 </div>
 
@@ -294,8 +293,8 @@
     </div>
     <div id="modes" role="group" aria-label="How do you want to play?">
       <button class="mode" id="modeSolo" aria-pressed="true"><b>Solo</b><span>One device: camera and game together</span></button>
-      <button class="mode" id="modePlayer" aria-pressed="false"><b>Join Room</b><span>Join the host using their room code</span></button>
-      <button class="mode" id="modeViewer" aria-pressed="false"><b>Host Room</b><span>Create a room and share its code</span></button>
+      <button class="mode" id="modePlayer" aria-pressed="false"><b>Player</b><span>This phone watches your body and steers the game on the Viewer</span></button>
+      <button class="mode" id="modeViewer" aria-pressed="false"><b>Viewer</b><span>This screen shows the gameplay (start this one first)</span></button>
     </div>
     <div id="camError" hidden></div>
     <div class="panel" id="panelSolo">
@@ -305,16 +304,16 @@
       </div>
     </div>
     <div class="panel" id="panelPlayer" hidden>
-      <p>Enter the host’s room code to join. A room supports <b>2 players total</b> (one host and one guest).</p>
+      <p>1. On the other screen choose <b>Viewer</b> and read out its code. 2. Prop this phone 2–3 m away so your whole body is in view. 3. Enter the code:</p>
       <div class="actions">
         <input id="joinCode" maxlength="5" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" aria-label="Viewer code" placeholder="CODE">
-        <button class="primary" id="btnJoin">Join &amp; start camera</button>
+        <button class="primary" id="btnJoin">Connect &amp; start camera</button>
       </div>
     </div>
     <div class="panel" id="panelViewer" hidden>
-      <p>Create a room. Your friend enters the same code using <b>Join Room</b>. The room supports you and one guest.</p>
+      <p>This screen shows the game. You get a 5-letter code (and a link) to enter on the Player phone. Your body movements are sent here in real time; the keyboard also works as a backup.</p>
       <div class="actions">
-        <button class="primary" id="btnViewer">Create Room</button>
+        <button class="primary" id="btnViewer">Start viewer</button>
       </div>
     </div>
     <div class="actions"><button class="ghost" id="btnClose">Close</button></div>
