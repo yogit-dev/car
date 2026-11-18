@@ -107,7 +107,8 @@ export class ViewerLink {
   }
 
   _accept(conn) {
-    if (this.conn && this.conn !== conn) { const old = this.conn; this.conn = null; try { old.close(); } catch { /* already closed */ } }
+    // One host + one guest only. Do not let a third device replace the active guest.
+    if (this.conn && this.conn !== conn && this.conn.open) { try { conn.close(); } catch { /* already closed */ } return; }
     this.conn = conn;
     const live = () => this.conn === conn;
     const up = () => { if (live()) this._set('connected'); };
