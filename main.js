@@ -149,10 +149,7 @@ function renderLink({ state, code, lost }) {
   box.hidden = false;
   box.classList.toggle('ok', state === 'connected');
   box.classList.toggle('compact', state === 'connected' || role === 'player');
-  linkEl.code.textContent = ''; // room code is shown only inside Settings
-  $('roomSettingsCode').textContent = code ?? '—';
-  $('roomSettingsState').textContent = role === 'viewer' ? (state === 'connected' ? 'Host room · guest connected' : 'Host room · waiting for one guest') : (state === 'connected' ? 'Joined room · connected to host' : 'Joined room · reconnecting');
-  $('btnCopyRoom').disabled = !code;
+  linkEl.code.textContent = code ?? '';
   if (role === 'viewer') {
     if (state === 'connected') { linkEl.state.textContent = 'Player connected'; linkEl.help.textContent = ''; }
     else {
@@ -485,12 +482,11 @@ document.addEventListener('click', (e) => {
 function cycleVehicle() { changeSetting({ vehicle: VEHICLE_TYPES[(VEHICLE_TYPES.indexOf(settings.vehicle) + 1) % VEHICLE_TYPES.length] }); }
 
 // the ⚙ panel
-function openSettings() { syncSettingsUi(); $('roomSettings').hidden = role === 'solo'; $('roomSettingsCode').textContent = link?.code ?? '—'; $('roomSettingsState').textContent = role === 'solo' ? 'Not in a room' : (link?.connected ? (role === 'viewer' ? 'Host room · guest connected' : 'Joined room · connected to host') : 'Waiting for connection'); $('btnCopyRoom').disabled = !link?.code; $('settings').hidden = false; $('btnSettingsClose').focus(); }
+function openSettings() { syncSettingsUi(); $('settings').hidden = false; $('btnSettingsClose').focus(); }
 function closeSettings() { $('settings').hidden = true; }
 buildSettingsPanel();
 $('btnSettings').addEventListener('click', openSettings);
 $('btnSettingsClose').addEventListener('click', closeSettings);
-$('btnCopyRoom').addEventListener('click', async () => { if (!link?.code) return; try { await navigator.clipboard.writeText(link.code); toast('Room code copied', 'ok'); } catch { toast(`Room code: ${link.code}`); } });
 $('settings').addEventListener('click', (e) => { if (e.target === $('settings')) closeSettings(); });   // tap outside the card
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('settings').hidden) closeSettings(); });
 
